@@ -23,6 +23,32 @@ export class PaymentsService {
     private readonly notificationService: NotificationService,
   ) { }
 
+  /** Verifica si un invoiceId pertenece al userId del cliente logueado */
+  async checkCustomerAccessToInvoice(invoiceId: string, userId: string) {
+    const supabase = this.supabaseService.getClient();
+
+    const { data: customer } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('user_id', userId)
+      .single();
+
+    if (!customer) throw new NotFoundException('Cliente no encontrado');
+
+    const { data: invoice } = await supabase
+      .from('invoices')
+      .select('service:service_id(customer_id)')
+      .eq('id', invoiceId)
+      .single();
+
+    if (!invoice) throw new NotFoundException('Factura no encontrada');
+
+    const service = Array.isArray(invoice.service) ? invoice.service[0] : invoice.service;
+    if (!service || service.customer_id !== customer.id) {
+      throw new NotFoundException('No tienes permiso para operar con esta factura');
+    }
+  }
+
   /**
    * GENERAR LINK DE PAGO CON MERCADO PAGO
    * Guarda checkout_id, qr_code_url y short_payment_url en la tabla invoices

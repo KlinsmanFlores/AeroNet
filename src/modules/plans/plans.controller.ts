@@ -41,7 +41,7 @@ export class PlansController {
    */
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin', 'technician', 'customer') 
+  @Roles('admin', 'technician', 'customer', 'prospect') 
   @ApiOperation({ summary: 'Obtener la lista de todos los planes disponibles' })
   findAll() {
     return this.plansService.findAll();
@@ -53,7 +53,7 @@ export class PlansController {
    */
   @Get(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin', 'technician', 'customer')
+  @Roles('admin', 'technician', 'customer', 'prospect')
   @ApiOperation({ summary: 'Obtener el detalle de un plan específico' })
   findOne(@Param('id') id: string) {
     return this.plansService.findOne(id);

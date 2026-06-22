@@ -22,12 +22,33 @@ import {
  * ESTADOS PERMITIDOS EN BD: 'pending', 'active', 'suspended'
  */
 export class CreateServiceWithTicketDto {
-  // Campos del Servicio
   @ApiProperty({ description: 'ID del plan seleccionado' })
   @IsUUID('4', { message: 'El ID del plan debe ser un UUID válido' })
   @IsNotEmpty()
   plan_id: string;
 
+  // Campos de Cliente requeridos por la Operadora
+  @ApiProperty({ description: 'Nombre completo o Razón Social' })
+  @IsString()
+  @IsNotEmpty({ message: 'El nombre completo es obligatorio' })
+  full_name: string;
+
+  @ApiProperty({ description: 'Tipo de documento (DNI, CE, RUC)' })
+  @IsString()
+  @IsNotEmpty({ message: 'El tipo de documento es obligatorio' })
+  document_type: string;
+
+  @ApiProperty({ description: 'Número de documento' })
+  @IsString()
+  @IsNotEmpty({ message: 'El número de documento es obligatorio' })
+  document_number: string;
+
+  @ApiProperty({ description: 'Teléfono de contacto' })
+  @IsString()
+  @IsNotEmpty({ message: 'El teléfono es obligatorio' })
+  phone: string;
+
+  // Campos del Servicio
   @ApiProperty({ example: 'Av. Ejército 123, Cayma', description: 'Dirección de la instalación' })
   @IsString()
   @IsNotEmpty({ message: 'La dirección es obligatoria' })

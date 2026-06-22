@@ -32,4 +32,9 @@ export class UpdateTicketDto {
   @IsBoolean()
   @IsOptional()
   requires_maintenance?: boolean;
+
+  @ApiPropertyOptional({ description: 'Notas de resolución para el cliente' })
+  @IsString()
+  @IsOptional()
+  resolution_notes?: string;
 }

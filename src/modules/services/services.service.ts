@@ -26,15 +26,57 @@ export class ServicesService {
   async createWithTicket(user: any, dto: CreateServiceWithTicketDto) {
     const supabase = this.supabaseService.getClient();
 
-    // 1. Obtener customer_id desde el usuario autenticado
-    const { data: customer, error: cError } = await supabase
-      .from('customers')
-      .select('id')
-      .eq('user_id', user.userId)
-      .maybeSingle();
+    // 1. Verificar si ya es cliente
+    const { data: customer } = await supabase.from('customers').select('id, full_name, document_type, document_number, phone').eq('user_id', user.userId).maybeSingle();
+    
+    let customerId = customer?.id;
 
-    if (cError || !customer) {
-      throw new BadRequestException('No se encontró un perfil de cliente asociado a este usuario.');
+    if (!customerId) {
+      // Crear un customer con todos los datos legales enviados en el DTO
+      let email = `cliente-${user.userId.slice(0,6)}@aeronet.pe`;
+      
+      try {
+          const { data: authUser } = await supabase.auth.admin.getUserById(user.userId);
+          if (authUser?.user) {
+              email = authUser.user.email || email;
+          }
+      } catch (e) {
+          this.logger.warn('No se pudo obtener data de auth.admin, usando valores genéricos');
+      }
+
+      const { data: newCustomer, error: createError } = await supabase.from('customers').insert([{
+          user_id: user.userId,
+          full_name: dto.full_name,
+          email: email,
+          document_type: dto.document_type,
+          document_number: dto.document_number,
+          phone: dto.phone,
+          status: 'active'
+      }]).select('id').single();
+
+      if (createError || !newCustomer) {
+        throw new BadRequestException(`No se pudo crear el perfil de cliente: ${createError?.message}`);
+      }
+      
+      customerId = newCustomer.id;
+
+      // Actualizar el rol en auth_users a 'customer' (ID de role: customer)
+      try {
+        const { data: customerRole } = await supabase.from('role').select('id').eq('name', 'customer').single();
+        if (customerRole) {
+          await supabase.from('auth_users').update({ role_id: customerRole.id }).eq('id', user.userId);
+        }
+      } catch (err) {
+        this.logger.warn(`No se pudo actualizar el rol a customer: ${err.message}`);
+      }
+    } else {
+      // Si el cliente ya existe, actualizamos su información con la más reciente de la solicitud
+      await supabase.from('customers').update({
+        full_name: dto.full_name,
+        document_type: dto.document_type,
+        document_number: dto.document_number,
+        phone: dto.phone
+      }).eq('id', customerId);
     }
 
     // 2. Obtener el plan para obtener el precio y nombre
@@ -48,15 +90,15 @@ export class ServicesService {
       throw new BadRequestException('Plan no encontrado');
     }
 
-    // 3. Crear el servicio con status 'pending'. billing_day no se asigna hasta la activación.
+    // 3. Crear el servicio con status 'pending'. customer_id puede ser nulo para prospectos.
     const newService = {
-      customer_id: customer.id,
+      customer_id: customerId,
       plan_id: dto.plan_id,
       address_text: dto.address_text,
       latitude: dto.latitude || null,
       longitude: dto.longitude || null,
       status: 'pending', // Estado inicial pendiente
-      billing_day: null, // Solo se define al pasar a active (evita facturación de servicios pending)
+      billing_day: null, // Solo se define al pasar a active
       monthly_amount: plan.price,
     };
 
@@ -71,18 +113,18 @@ export class ServicesService {
       throw new BadRequestException(`Error al crear el servicio: ${serviceError.message}`);
     }
 
-    // 4. Crear el ticket de tipo 'work_order' asociado al servicio
+    // 4. Crear el ticket de tipo 'work_order'
     const ticketSubject = dto.ticket_subject || `Instalación de nuevo servicio - Plan ${plan.name || plan.id.slice(0, 8)}`;
     const ticketData = {
-      customer_id: customer.id,
+      customer_id: customerId,
       type: 'work_order',
       subject: ticketSubject,
       description: dto.ticket_description || `Solicitud de instalación en: ${dto.address_text}`,
-      services_id: service.id,
+      service_id: service.id,
       priority: dto.ticket_priority || 'medium',
       status: 'open',
       technician_id: null,
-      category: 'instalacion',
+      category: 'NUEVO_SERVICIO',
       requires_maintenance: false,
     };
 
@@ -93,7 +135,6 @@ export class ServicesService {
       .single();
 
     if (ticketError) {
-      // Si falla la creación del ticket, eliminamos el servicio creado (rollback manual)
       this.logger.error(`Error creando ticket: ${ticketError.message}. Eliminando servicio ${service.id}`);
       await supabase.from(this.table).delete().eq('id', service.id);
       throw new BadRequestException(`Error al crear el ticket de instalación: ${ticketError.message}`);
@@ -142,14 +183,16 @@ export class ServicesService {
 
   async findMyServices(userId: string) {
     const supabase = this.supabaseService.getClient();
-    const { data: customer } = await supabase
-      .from('customers').select('id').eq('user_id', userId).single();
+    const { data: customer, error: custError } = await supabase
+      .from('customers').select('id').eq('user_id', userId).maybeSingle();
+
+    this.logger.log(`findMyServices userId: ${userId}, customer: ${JSON.stringify(customer)}, custError: ${JSON.stringify(custError)}`);
 
     if (!customer) return [];
 
     const { data, error } = await supabase
       .from(this.table)
-      .select('*, plan:plans(name, price, download_speed, upload_speed)')
+      .select('*, plan:plans(name, price, speed_mbps)')
       .eq('customer_id', customer.id);
 
     if (error) throw new BadRequestException(error.message);
@@ -192,9 +235,9 @@ export class ServicesService {
 
     const { data: ticketRefs } = await supabase
       .from('tickets')
-      .select('services_id')
-      .not('services_id', 'is', null);
-    const validIds = new Set((ticketRefs ?? []).map((t: { services_id: string }) => t.services_id));
+      .select('service_id')
+      .not('service_id', 'is', null);
+    const validIds = new Set((ticketRefs ?? []).map((t: { service_id: string }) => t.service_id));
 
     return services.filter(s => s.status !== 'pending' || validIds.has(s.id));
   }

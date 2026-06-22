@@ -1,4 +1,4 @@
-import { ApiProperty } from "@nestjs/swagger";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { IsString, IsNotEmpty, IsNumber, Min, MaxLength, IsOptional } from "class-validator";
 
 /**
@@ -18,6 +18,14 @@ export class CreatePlanDto {
     name: string;
 
     @ApiProperty({ 
+        example: 100, 
+        description: 'Velocidad en Mbps' 
+    })
+    @IsNumber({}, { message: 'La velocidad debe ser un número' })
+    @Min(1, { message: 'La velocidad mínima es de 1 Mbps' })
+    speed_mbps: number;
+
+    @ApiProperty({ 
         example: 79.90, 
         description: 'Costo mensual del servicio en soles (PEN)' 
     })
@@ -25,21 +33,12 @@ export class CreatePlanDto {
     @Min(0, { message: 'El precio no puede ser un valor negativo' })
     price: number;
 
-    @ApiProperty({ 
-        example: 100, 
-        description: 'Velocidad de descarga contratada en Mbps' 
+    @ApiPropertyOptional({ 
+        example: 'Plan ideal para teletrabajo y Netflix', 
+        description: 'Descripción del plan' 
     })
-    @IsNumber({}, { message: 'La velocidad de descarga debe ser un número' })
-    @Min(1, { message: 'La velocidad de descarga mínima es de 1 Mbps' })
-    download_speed: number;
-
-    @ApiProperty({ 
-        example: 100, 
-        description: 'Velocidad de subida contratada en Mbps' 
-    })
-    @IsNumber({}, { message: 'La velocidad de subida debe ser un número' })
-    @Min(1, { message: 'La velocidad de subida mínima es de 1 Mbps' })
-    upload_speed: number;
-
+    @IsString({ message: 'La descripción debe ser una cadena de texto' })
+    @IsOptional()
+    description?: string;
 
 }

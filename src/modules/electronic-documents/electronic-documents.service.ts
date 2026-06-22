@@ -158,6 +158,32 @@ export class ElectronicDocumentsService {
     return data;
   }
 
+  /** Verifica si un invoiceId pertenece al userId del cliente logueado */
+  async checkCustomerAccessToInvoice(invoiceId: string, userId: string) {
+    const supabase = this.supabaseService.getClient();
+
+    const { data: customer } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('user_id', userId)
+      .single();
+
+    if (!customer) throw new NotFoundException('Cliente no encontrado');
+
+    const { data: invoice } = await supabase
+      .from('invoices')
+      .select('service:service_id(customer_id)')
+      .eq('id', invoiceId)
+      .single();
+
+    if (!invoice) throw new NotFoundException('Factura no encontrada');
+
+    const service = Array.isArray(invoice.service) ? invoice.service[0] : invoice.service;
+    if (!service || service.customer_id !== customer.id) {
+      throw new NotFoundException('No tienes permiso para acceder a los documentos de esta factura');
+    }
+  }
+
   /** Lista todos los comprobantes electrónicos con datos del cliente y factura. */
   async findAll() {
     const { data, error } = await this.supabaseService.getClient()
@@ -387,22 +413,9 @@ export class ElectronicDocumentsService {
 
     let lastNumber = data?.number ?? 0;
 
-    // 2. Si NO hay registros en BD (lastNumber === 0), sincronizamos con el punto de partida
+    // 2. Si NO hay registros en BD (lastNumber === 0), iniciamos desde 0
     if (lastNumber === 0) {
-      // IMPORTANTE: Estos deben ser los mismos fallbacks que en el método create()
-      const serieFactura = this.configService.get<string>('nubefact.serieFactura') || process.env.NUBEFACT_SERIE_FACTURA || 'FFF1';
-      const serieBoleta = this.configService.get<string>('nubefact.serieBoleta') || process.env.NUBEFACT_SERIE_BOLETA || 'BBB1';
-      
-      const lastFactura = this.configService.get<number>('nubefact.lastNumberFactura') ?? parseInt(process.env.NUBEFACT_LAST_NUMBER_FACTURA || '606', 10);
-      const lastBoleta = this.configService.get<number>('nubefact.lastNumberBoleta') ?? parseInt(process.env.NUBEFACT_LAST_NUMBER_BOLETA || '5120', 10);
-
-      if (series === serieFactura) {
-        lastNumber = lastFactura;
-        this.logger.log(`[ElectronicDocumentsService] Serie ${series} vacía en BD; iniciando en ${lastNumber} según config.`);
-      } else if (series === serieBoleta) {
-        lastNumber = lastBoleta;
-        this.logger.log(`[ElectronicDocumentsService] Serie ${series} vacía en BD; iniciando en ${lastNumber} según config.`);
-      }
+      this.logger.log(`[ElectronicDocumentsService] Serie ${series} vacía en BD; iniciando desde 1.`);
     }
 
     // 3. Incrementamos siempre +1

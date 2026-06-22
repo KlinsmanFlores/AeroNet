@@ -38,7 +38,7 @@ export class TicketsController {
 
   /** GET my-tickets: lista los tickets del cliente autenticado. */
   @Get('my-tickets')
-  @Roles('customer', 'prospect')
+  @Roles('customer', 'prospect', 'admin')
   @ApiOperation({ summary: 'Listar mis propios tickets (Solo Clientes o Prospectos)' })
   myTickets(@Req() req) {
     return this.ticketsService.getMyTickets(req.user);
@@ -79,7 +79,7 @@ export class TicketsController {
     // Lógica de seguridad para clientes y prospectos:
     if (user.role === 'customer' || user.role === 'prospect') {
       const customer = ticket.customer as { user_id?: string } | null;
-      if ((!customer || customer.user_id !== user.userId) && ticket.user_id !== user.userId) {
+      if (!customer || customer.user_id !== user.userId) {
         throw new ForbiddenException('No tienes permiso para ver este ticket');
       }
     }

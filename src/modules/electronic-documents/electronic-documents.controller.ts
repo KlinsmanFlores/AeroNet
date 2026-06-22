@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, UseGuards, NotFoundException,BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, UseGuards, NotFoundException, BadRequestException, Request } from '@nestjs/common';
 import { ElectronicDocumentsService } from './electronic-documents.service';
 import { CreateElectronicDocumentDto } from './dto/create-electronic-document.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
@@ -86,21 +86,37 @@ export class ElectronicDocumentsController {
   @Get('invoice/:invoiceId')
   @Roles('admin', 'customer')
   @ApiOperation({ summary: 'Listar documentos asociados a una factura específica' })
-  findByInvoice(@Param('invoiceId') invoiceId: string) {
+  async findByInvoice(@Param('invoiceId') invoiceId: string, @Request() req) {
+    if (req.user.role === 'customer') {
+      await this.service.checkCustomerAccessToInvoice(invoiceId, req.user.userId);
+    }
     return this.service.findByInvoice(invoiceId);
   }
 
   @Post('invoice/:invoiceId/refresh')
   @Roles('admin', 'customer')
   @ApiOperation({ summary: 'Forzar validación del comprobante (recuperar pdf_url si se generó pero no se guardó)' })
-  refreshComprobante(@Param('invoiceId') invoiceId: string) {
+  async refreshComprobante(@Param('invoiceId') invoiceId: string, @Request() req) {
+    if (req.user.role === 'customer') {
+      await this.service.checkCustomerAccessToInvoice(invoiceId, req.user.userId);
+    }
     return this.service.refreshComprobanteByInvoiceId(invoiceId);
   }
 
   @Get(':id')
   @Roles('admin', 'customer')
   @ApiOperation({ summary: 'Obtener detalle de un documento por UUID' })
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
+  async findOne(@Param('id') id: string, @Request() req) {
+    const doc = await this.service.findOne(id);
+    if (!doc) throw new NotFoundException('Documento no encontrado');
+
+    if (req.user.role === 'customer') {
+      if (doc.invoice_id) {
+        await this.service.checkCustomerAccessToInvoice(doc.invoice_id, req.user.userId);
+      } else {
+        throw new NotFoundException('Documento no asociado a una factura accesible');
+      }
+    }
+    return doc;
   }
 }

@@ -24,9 +24,9 @@ export class ServicesController {
     return this.servicesService.create(createServiceDto);
   }
 
-  /** POST with-ticket: crea servicio y ticket de instalación en una operación (solo cliente). */
+  /** POST with-ticket: crea servicio y ticket de instalación en una operación (solo cliente/prospecto). */
   @Post('with-ticket')
-  @Roles('customer')
+  @Roles('customer', 'prospect')
   @ApiOperation({ summary: 'Crear servicio con ticket de instalación automático (Frontend Cliente)' })
   createWithTicket(@Request() req, @Body() dto: CreateServiceWithTicketDto) {
     return this.servicesService.createWithTicket(req.user, dto);
@@ -42,7 +42,7 @@ export class ServicesController {
 
   /** GET my-services: lista los servicios del cliente/técnico autenticado. */
   @Get('my-services')
-  @Roles('admin', 'technician', 'customer')
+  @Roles('admin', 'technician', 'customer', 'prospect')
   @ApiOperation({ summary: 'Listar servicios del cliente logueado (App)' })
   findMyServices(@Request() req) {
     return this.servicesService.findMyServices(req.user.userId);

@@ -99,7 +99,8 @@ export class InvoicesService {
       // Ajustar billing_day si es mayor que los días del mes
       const periodDate = new Date(period + '-01');
       const daysInMonth = new Date(periodDate.getFullYear(), periodDate.getMonth() + 1, 0).getDate();
-      const actualBillingDay = Math.min(service.billing_day, daysInMonth);
+      const safeBillingDay = service.billing_day || 1;
+      const actualBillingDay = Math.min(safeBillingDay, daysInMonth);
       const dueDate = `${period}-${String(actualBillingDay).padStart(2, '0')}`;
 
       try {

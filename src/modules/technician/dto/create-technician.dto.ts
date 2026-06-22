@@ -43,11 +43,20 @@ export class CreateTechnicianDto {
   phone?: string;
 
   @ApiProperty({
-    description: 'Zona de trabajo asignada al técnico',
-    example: 'Lima Norte',
+    description: 'Número de documento de identidad',
+    example: '76543210',
     required: false,
   })
   @IsString()
   @IsOptional()
-  zone?: string;
+  document_number?: string;
+
+  @ApiProperty({
+    description: 'Especialización del técnico',
+    example: 'Fibra Óptica',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  specialization?: string;
 }

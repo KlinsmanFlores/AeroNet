@@ -228,7 +228,8 @@ export class TasksService {
             // Calcular la fecha del billing_day para el mes actual
             // Ajustar si billing_day es mayor que los días del mes (ej: billing_day=31 en febrero)
             const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
-            const actualBillingDay = Math.min(service.billing_day, daysInMonth);
+            const safeBillingDay = service.billing_day || 1;
+            const actualBillingDay = Math.min(safeBillingDay, daysInMonth);
             const billingDateThisMonth = new Date(currentYear, currentMonth - 1, actualBillingDay);
             
             // La deuda se genera si el billing_day del mes actual YA PASÓ o ES HOY
@@ -272,7 +273,8 @@ export class TasksService {
                 // La fecha de vencimiento es el billing_day de este mes (el día que debía pagar)
                 // Ajustar si billing_day es mayor que los días del mes (ej: billing_day=31 en febrero)
                 const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
-                const actualBillingDay = Math.min(service.billing_day, daysInMonth);
+                const safeBillingDay = service.billing_day || 1;
+                const actualBillingDay = Math.min(safeBillingDay, daysInMonth);
                 const billingDate = new Date(currentYear, currentMonth - 1, actualBillingDay);
                 const dueDate = billingDate.toISOString().split('T')[0];
 

@@ -34,24 +34,45 @@ export class TicketsService {
     const supabase = this.supabaseService.getClient();
 
     // 1. Obtener customer_id real desde la tabla customers usando el user_id de Auth
-    const { data: customer } = await supabase
+    const { data: existingCustomer } = await supabase
       .from('customers')
       .select('id')
       .eq('user_id', user.userId)
       .maybeSingle();
 
-    const customerId = customer ? customer.id : null;
+    let customerId = existingCustomer ? existingCustomer.id : null;
+
+    if (!customerId) {
+        let email = `cliente-${user.userId.slice(0,6)}@aeronet.pe`;
+        let fullName = 'Cliente Nuevo';
+        try {
+            const { data: authUser } = await supabase.auth.admin.getUserById(user.userId);
+            if (authUser?.user) {
+                email = authUser.user.email || email;
+                fullName = authUser.user.user_metadata?.full_name || fullName;
+            }
+        } catch (e) {}
+
+        const { data: newCustomer } = await supabase.from('customers').insert([{
+            user_id: user.userId,
+            full_name: fullName,
+            email: email,
+            status: 'active'
+        }]).select('id').single();
+        if (newCustomer) {
+            customerId = newCustomer.id;
+        }
+    }
 
     const subject = (dto.subject?.trim() && dto.subject) || `Trámite de ${CATEGORY_SUBJECT_LABEL[dto.category]}`;
 
-    // 2. Preparar payload para la DB (columna en tabla = services_id, no service_id)
+    // 2. Preparar payload para la DB
     const newTicket = {
       customer_id: customerId,
-      user_id: user.userId, // Soporte para prospectos
       type: dto.type,
       subject,
       description: dto.description,
-      services_id: dto.service_id || null,
+      service_id: dto.service_id || null,
       requested_plan: dto.requested_plan || null,
       category: dto.category,
       priority: dto.priority || 'medium',
@@ -91,15 +112,16 @@ export class TicketsService {
       .eq('user_id', user.userId)
       .maybeSingle();
 
-    // 2. Consultar TODOS los tickets del cliente/prospecto
-    const orFilter = customer ? `customer_id.eq.${customer.id},user_id.eq.${user.userId}` : `user_id.eq.${user.userId}`;
+    // 2. Consultar TODOS los tickets del cliente
+    if (!customer) return [];
+
     const { data, error } = await supabase
       .from(this.table)
       .select(`
         *,
         service:services (id, address_text, plan:plans(name))
       `)
-      .or(orFilter)
+      .eq('customer_id', customer.id)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -147,9 +169,13 @@ export class TicketsService {
   async completeInstallation(ticketId: string, user: any) {
     const supabase = this.supabaseService.getClient();
 
-    // 1. Validar que el técnico existe
-    const { data: tech } = await supabase.from('technicians').select('id').eq('user_id', user.userId).maybeSingle();
+    // 1. Validar que el técnico existe (solo si es técnico)
+    let tech = null;
     const isTech = user.role === 'technician';
+    if (isTech && user.userId) {
+        const { data } = await supabase.from('technicians').select('id').eq('user_id', user.userId).maybeSingle();
+        tech = data;
+    }
     if (isTech && !tech) throw new BadRequestException('No eres un técnico válido');
 
     // 2. Obtener el ticket
@@ -164,46 +190,39 @@ export class TicketsService {
     // 4. Actualizar estado del ticket a completado
     await supabase.from(this.table).update({ status: 'completed' }).eq('id', ticketId);
 
-    // 5. Activar el servicio si existe
-    if (ticket.services_id) {
-        await supabase.from('services').update({ status: 'active' }).eq('id', ticket.services_id);
+    // 5. Activar el servicio si existe, registrar fecha y establecer el billing_day automáticamente
+    if (ticket.service_id) {
+        const today = new Date();
+        await supabase.from('services').update({ 
+            status: 'active',
+            installation_date: today.toISOString(),
+            billing_day: today.getDate() // Día del 1 al 31
+        }).eq('id', ticket.service_id);
     }
 
-    // 6. Promover de Prospecto a Cliente si es necesario
-    if (ticket.user_id && !ticket.customer_id) {
-        const { data: existingCustomer } = await supabase.from('customers').select('id').eq('user_id', ticket.user_id).maybeSingle();
-        
-        if (!existingCustomer) {
-            // Intentar recuperar email del auth
-            let email = `cliente-${ticket.user_id.slice(0,6)}@aeronet.pe`;
-            let fullName = 'Cliente Autogenerado (Actualizar)';
-            
-            try {
-                const { data: authUser } = await supabase.auth.admin.getUserById(ticket.user_id);
-                if (authUser?.user) {
-                    email = authUser.user.email || email;
-                    fullName = authUser.user.user_metadata?.full_name || fullName;
-                }
-            } catch (e) {
-                this.logger.warn('No se pudo obtener data de auth.admin, usando valores genéricos');
-            }
+    // 6. Promover de Prospecto a Cliente
+    if (ticket.customer_id) {
+        // Obtener el user_id desde el customer
+        const { data: customerData } = await supabase
+            .from('customers')
+            .select('user_id')
+            .eq('id', ticket.customer_id)
+            .maybeSingle();
 
-            const { data: roleData } = await supabase.from('role').select('id').eq('name', 'customer').single();
-            if (roleData) {
-                // Actualizar rol
-                await supabase.from('auth_users').update({ role_id: roleData.id }).eq('id', ticket.user_id);
+        if (customerData && customerData.user_id) {
+            // Verificar si el rol actual es prospect, si es así, cambiar a customer
+            const { data: currentAuth } = await supabase
+                .from('auth_users')
+                .select('role:role_id (name)')
+                .eq('id', customerData.user_id)
+                .maybeSingle();
                 
-                // Insertar customer
-                const { data: newCustomer } = await supabase.from('customers').insert([{
-                    user_id: ticket.user_id,
-                    full_name: fullName,
-                    email: email,
-                    status: 'active'
-                }]).select('id').single();
+            const roleName = Array.isArray(currentAuth?.role) ? currentAuth.role[0]?.name : (currentAuth?.role as any)?.name;
 
-                // Enlazar el ticket al nuevo customer
-                if (newCustomer) {
-                    await supabase.from(this.table).update({ customer_id: newCustomer.id }).eq('id', ticketId);
+            if (roleName === 'prospect') {
+                const { data: roleData } = await supabase.from('role').select('id').eq('name', 'customer').single();
+                if (roleData) {
+                    await supabase.from('auth_users').update({ role_id: roleData.id }).eq('id', customerData.user_id);
                 }
             }
         }
@@ -223,7 +242,8 @@ export class TicketsService {
       .select(`
         *,
         service:services (id, address_text, plan:plans(name)),
-        customer:customers (id, full_name)
+        customer:customers (id, full_name),
+        technician:technicians (id, full_name)
       `)
       .order('created_at', { ascending: false });
 
@@ -247,7 +267,8 @@ export class TicketsService {
       .select(`
         *,
         service:services (id, address_text, plan:plans(name)),
-        customer:customers (id, full_name, user_id)
+        customer:customers (id, full_name, user_id),
+        technician:technicians (id, full_name)
       `)
       .eq('id', id)
       .single();
@@ -295,6 +316,15 @@ export class TicketsService {
       throw new BadRequestException(error.message);
     }
 
+    // Automatización: Si el admin marca el ticket como Resuelto/Cerrado, completamos la instalación
+    if (dto.status === 'resolved' || dto.status === 'closed' || dto.status === 'completed') {
+      try {
+        await this.completeInstallation(id, { role: 'admin' });
+      } catch (e) {
+        this.logger.error(`Error auto-completando instalación: ${e.message}`);
+      }
+    }
+
     return data;
   }
 
@@ -307,7 +337,7 @@ export class TicketsService {
 
     const { data: ticket, error: fetchError } = await supabase
       .from(this.table)
-      .select('id, type, services_id')
+      .select('id, type, service_id')
       .eq('id', id)
       .single();
 
@@ -315,7 +345,7 @@ export class TicketsService {
       throw new NotFoundException('Ticket no encontrado');
     }
 
-    const serviceId = ticket.services_id ?? (ticket as { service_id?: string }).service_id;
+    const serviceId = ticket.service_id ?? (ticket as { service_id?: string }).service_id;
 
     if (ticket.type === 'work_order' && serviceId) {
       const { data: service } = await supabase

@@ -20,21 +20,12 @@ export class AuthService {
         const supabase = this.supabaseService.getClient();
 
         try {
-            // PASO 0: Obtener el ID del rol 'prospect' (necesario para auth_users)
-            const { data: roleData } = await supabase
-                .from('role')
-                .select('id')
-                .eq('name', 'prospect')
-                .single();
-
-            if (!roleData) throw new BadRequestException('El rol prospect no existe');
-
             // PASO 1: Registro en Supabase Auth
-            // Al NO haber Trigger, esto NO dará el error "Database error saving new user"
-            const { data: authData, error: authError } = await supabase.auth.signUp({
+            const { data: authData, error: authError } = await supabase.auth.admin.createUser({
                 email,
                 password,
-                options: { data: { full_name } }
+                email_confirm: true,
+                user_metadata: { full_name }
             });
 
             if (authError || !authData?.user) {
@@ -43,18 +34,18 @@ export class AuthService {
 
             const authUserId = authData.user.id;
 
-            // PASO 2: Insertar en auth_users (Esquema AeroNet)
-            // Vinculamos el UUID de Auth con el rol y el estado
+            // PASO 2: Upsert en auth_users sin rol específico aún (role_id = null)
             const { error: roleLinkError } = await supabase
                 .from('auth_users')
-                .insert([{
+                .upsert({
                     id: authUserId,
-                    role_id: roleData.id,
+                    role_id: null,
                     status: 'active'
-                }]);
+                });
 
             if (roleLinkError) {
-                this.logger.error(`Error vinculando rol: ${roleLinkError.message}`);
+                this.logger.error(`Error en auth_users: ${roleLinkError.message}`);
+                // No lanzamos error para no bloquear si ya se creó en auth
             }
 
             return { 
@@ -84,17 +75,17 @@ export class AuthService {
 
             if (roleError || !roleData) throw new BadRequestException(`El rol "${role_name}" no existe`);
 
-            const { data: authData, error: authError } = await supabase.auth.signUp({ email, password });
+            const { data: authData, error: authError } = await supabase.auth.admin.createUser({ email, password, email_confirm: true });
 
             if (authError || !authData?.user) throw new BadRequestException(authError?.message);
 
             const { error: profileError } = await supabase
                 .from('auth_users') 
-                .insert([{
+                .upsert({
                     id: authData.user.id,
                     role_id: roleData.id,
                     status: 'active',
-                }]);
+                });
 
             if (profileError) throw new BadRequestException('Error al crear el perfil administrativo');
 
@@ -124,32 +115,32 @@ export class AuthService {
                 throw new UnauthorizedException('Correo o contraseña incorrectos');
             }
 
-            // Obtener perfil y rol del usuario
-            const { data: userProfile, error: profileError } = await supabase
+            let roleName = 'prospect'; // Rol por defecto si no tiene rol asignado en la BD
+
+            // Obtener el perfil del usuario para ver su rol
+            const { data: userProfile } = await supabase
                 .from('auth_users')
                 .select('role_id')
                 .eq('id', authData.user.id)
                 .single();
 
-            if (profileError || !userProfile) {
-                throw new BadRequestException('El usuario no tiene un perfil asignado');
-            }
-
-            const { data: roleData, error: roleError } = await supabase
-                .from('role')
-                .select('name')
-                .eq('id', userProfile.role_id)
-                .single();
-
-            if (roleError || !roleData) {
-                throw new BadRequestException('No se pudo identificar el rol del usuario');
+            if (userProfile && userProfile.role_id) {
+                const { data: roleData } = await supabase
+                    .from('role')
+                    .select('name')
+                    .eq('id', userProfile.role_id)
+                    .single();
+                
+                if (roleData) {
+                    roleName = roleData.name;
+                }
             }
 
             // Generar Payload y Token
             const payload = { 
                 email: authData.user.email, 
                 sub: authData.user.id, 
-                role: roleData.name 
+                role: roleName 
             };
 
             return {
@@ -157,7 +148,7 @@ export class AuthService {
                 user: {
                     id: authData.user.id,
                     email: authData.user.email,
-                    role: roleData.name
+                    role: roleName
                 }
             };
 

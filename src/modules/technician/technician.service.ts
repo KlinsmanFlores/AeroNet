@@ -13,7 +13,7 @@ export class TechnicianService {
 
   /** Crea un técnico: registro en Supabase Auth, auth_users y tabla technicians. */
   async create(createTechnicianDto: CreateTechnicianDto) {
-    const { email, password, full_name, phone, zone } = createTechnicianDto;
+    const { email, password, full_name, phone, document_number, specialization } = createTechnicianDto;
     const supabase = this.supabaseService.getClient();
 
     try {
@@ -29,9 +29,10 @@ export class TechnicianService {
       }
 
       // PASO 1: Crear en Supabase Auth
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
         email,
         password,
+        email_confirm: true,
       });
 
       if (authError || !authData?.user) {
@@ -40,14 +41,14 @@ export class TechnicianService {
 
       const authUserId = authData.user.id;
 
-      // PASO 2: Insertar en auth_users
+      // PASO 2: Upsert en auth_users
       const { error: authUsersError } = await supabase
         .from('auth_users')
-        .insert([{
+        .upsert({
           id: authUserId,
           role_id: roleData.id,
           status: 'active',
-        }]);
+        });
 
       if (authUsersError) {
         throw new BadRequestException(`Error en auth_users: ${authUsersError.message}`);
@@ -61,7 +62,8 @@ export class TechnicianService {
           email: email,
           full_name: full_name,
           phone: phone || null,
-          zone: zone || null,
+          document_number: document_number || null,
+          specialization: specialization || null,
           status: 'active',
         }])
         .select()

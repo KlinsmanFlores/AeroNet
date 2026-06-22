@@ -43,7 +43,11 @@ export class InvoicesController {
   @Post('generate-monthly')
   @Roles('admin')
   @ApiOperation({ summary: 'Generar deudas del mes para todos los servicios activos' })
-  generateMonthly(@Query('period') period: string) {
+  generateMonthly(@Query('period') period?: string) {
+    if (!period) {
+      const today = new Date();
+      period = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    }
     return this.invoicesService.generateMonthlyInvoices(period);
   }
 
@@ -75,7 +79,7 @@ export class InvoicesController {
    * Extraemos el userId del token JWT para asegurar que el cliente solo vea sus deudas.
    */
   @Get('my-debts')
-  @Roles('customer')
+  @Roles('customer', 'admin')
   @ApiOperation({ summary: 'Consultar deudas del cliente autenticado (App Móvil)' })
   findMyDebts(@Request() req) {
     // req.user.userId viene del payload del JWT decodificado
@@ -87,7 +91,7 @@ export class InvoicesController {
    * Devuelve factura, servicio, plan y cliente para renderizar el formulario de pago.
    */
   @Get(':id/payment-details')
-  @Roles('customer')
+  @Roles('customer', 'admin')
   @ApiOperation({ summary: 'Obtener datos de factura para pago (cliente)' })
   findPaymentDetails(@Param('id') id: string, @Request() req: { user: { userId: string } }) {
     return this.invoicesService.findPaymentDetails(id, req.user.userId);
@@ -95,12 +99,26 @@ export class InvoicesController {
 
   /**
    * CONSULTAR DEUDA ESPECÍFICA POR ID
+   * Verifica que si es cliente, la deuda le pertenezca.
    */
   @Get(':id')
   @Roles('admin', 'technician', 'customer')
   @ApiOperation({ summary: 'Ver detalle de una deuda específica' })
-  findOne(@Param('id') id: string) {
-    return this.invoicesService.findOne(id);
+  async findOne(@Param('id') id: string, @Request() req) {
+    const user = req.user;
+    const invoice = await this.invoicesService.findOne(id);
+
+    // Seguridad: si es customer, la factura debe estar en un servicio que pertenezca a su customer profile
+    if (user.role === 'customer') {
+      const serviceData = Array.isArray(invoice.service) ? invoice.service[0] : invoice.service;
+      const invCustomer = serviceData?.customer;
+      
+      if (!invCustomer || invCustomer.user_id !== user.userId) {
+        throw new NotFoundException('No tienes permiso para ver esta factura');
+      }
+    }
+
+    return invoice;
   }
 
   /**
@@ -131,6 +149,8 @@ export class InvoicesController {
    * ACTUALIZADO: Ahora envía QR y Link de pago usando el nuevo sistema
    */
   @Post(':id/send-whatsapp')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Enviar recordatorio de pago manual por WhatsApp' })
   async sendWhatsappNotification(@Param('id') id: string) {
     // Delegamos al paymentsService que maneja todo el flujo:
     // - Buscar factura y cliente

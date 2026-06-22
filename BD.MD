@@ -1,226 +1,179 @@
-```sql
--- ==========================================
--- SCRIPT DE BASE DE DATOS AERONET (PostgreSQL)
--- Ejecutar en Supabase SQL Editor
--- ==========================================
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
 
--- Crear el esquema personalizado
-CREATE SCHEMA IF NOT EXISTS aeronet;
-
--- ==========================================
--- 1. TIPOS ENUMERADOS
--- ==========================================
-CREATE TYPE aeronet.ticket_type AS ENUM ('ticket', 'work_order');
-CREATE TYPE aeronet.ticket_priority AS ENUM ('low', 'medium', 'high', 'urgent');
-CREATE TYPE aeronet.ticket_category AS ENUM ('NUEVO_SERVICIO', 'REACTIVACION', 'FACTURACION', 'TRASLADO', 'RECIBO_FISICO', 'RECLAMO', 'SUSPENSION', 'MEJORA_PLAN', 'COBERTURA_WIFI', 'PAUSA_VACACIONES');
-CREATE TYPE aeronet.service_status AS ENUM ('pending', 'active', 'suspended');
-
--- ==========================================
--- 2. TABLAS BASE Y ROLES
--- ==========================================
-
--- Tabla de Roles
 CREATE TABLE aeronet.role (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(50) UNIQUE NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name character varying NOT NULL UNIQUE,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT role_pkey PRIMARY KEY (id)
 );
-
--- Semillar Roles requeridos para Auth y Registro
-INSERT INTO aeronet.role (name) VALUES
-('admin'),
-('customer'),
-('technician'),
-('prospect')
-ON CONFLICT (name) DO NOTHING;
-
--- Tabla de Usuarios (Extensión de auth.users de Supabase)
 CREATE TABLE aeronet.auth_users (
-    id UUID PRIMARY KEY, -- Referencia manual a auth.users(id) de Supabase
-    role_id UUID REFERENCES aeronet.role(id),
-    status VARCHAR(20) DEFAULT 'active',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id uuid NOT NULL,
+  role_id uuid,
+  status character varying DEFAULT 'active'::character varying,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT auth_users_pkey PRIMARY KEY (id),
+  CONSTRAINT auth_users_role_id_fkey FOREIGN KEY (role_id) REFERENCES aeronet.role(id)
 );
-
--- ==========================================
--- 3. MÓDULOS DEL NEGOCIO
--- ==========================================
-
--- Clientes
 CREATE TABLE aeronet.customers (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES aeronet.auth_users(id),
-    document_type VARCHAR(20),
-    document_number VARCHAR(50),
-    full_name VARCHAR(150) NOT NULL,
-    phone VARCHAR(50),
-    email VARCHAR(150) NOT NULL,
-    billing_document_type VARCHAR(20) DEFAULT 'BOLETA',
-    avatar_url TEXT,
-    address TEXT,
-    city VARCHAR(100),
-    state VARCHAR(100),
-    postal_code VARCHAR(20),
-    status VARCHAR(20) DEFAULT 'active',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  document_type character varying,
+  document_number character varying,
+  full_name character varying NOT NULL,
+  phone character varying,
+  email character varying NOT NULL,
+  billing_document_type character varying DEFAULT 'BOLETA'::character varying,
+  avatar_url text,
+  address text,
+  city character varying,
+  state character varying,
+  postal_code character varying,
+  status character varying DEFAULT 'active'::character varying,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT customers_pkey PRIMARY KEY (id),
+  CONSTRAINT customers_user_id_fkey FOREIGN KEY (user_id) REFERENCES aeronet.auth_users(id)
 );
-
--- Planes de Internet
 CREATE TABLE aeronet.plans (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(100) NOT NULL,
-    speed_mbps INTEGER NOT NULL,
-    price DECIMAL(10,2) NOT NULL,
-    description TEXT,
-    status VARCHAR(20) DEFAULT 'active',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name character varying NOT NULL,
+  speed_mbps integer NOT NULL,
+  price numeric NOT NULL,
+  description text,
+  status character varying DEFAULT 'active'::character varying,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT plans_pkey PRIMARY KEY (id)
 );
-
--- Servicios (Suscripciones Activas)
 CREATE TABLE aeronet.services (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    customer_id UUID REFERENCES aeronet.customers(id),
-    plan_id UUID REFERENCES aeronet.plans(id),
-    address_text TEXT NOT NULL,
-    latitude DECIMAL(10,6),
-    longitude DECIMAL(10,6),
-    status aeronet.service_status DEFAULT 'pending',
-    billing_day INTEGER CHECK (billing_day >= 1 AND billing_day <= 31),
-    monthly_amount DECIMAL(10,2) NOT NULL,
-    sync_status VARCHAR(50), -- Requerido por lógica de sincronización e invoices
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  customer_id uuid,
+  plan_id uuid,
+  address_text text NOT NULL,
+  latitude numeric,
+  longitude numeric,
+  status USER-DEFINED DEFAULT 'pending'::aeronet.service_status,
+  billing_day integer CHECK (billing_day >= 1 AND billing_day <= 31),
+  monthly_amount numeric NOT NULL,
+  sync_status character varying,
+  installation_date timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT services_pkey PRIMARY KEY (id),
+  CONSTRAINT services_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES aeronet.customers(id),
+  CONSTRAINT services_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES aeronet.plans(id)
 );
-
--- Técnicos
 CREATE TABLE aeronet.technicians (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES aeronet.auth_users(id),
-    full_name VARCHAR(150) NOT NULL,
-    phone VARCHAR(50),
-    document_number VARCHAR(50),
-    email VARCHAR(150),
-    status VARCHAR(20) DEFAULT 'active',
-    specialization VARCHAR(100),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid,
+  full_name character varying NOT NULL,
+  phone character varying,
+  document_number character varying,
+  email character varying,
+  status character varying DEFAULT 'active'::character varying,
+  specialization character varying,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT technicians_pkey PRIMARY KEY (id),
+  CONSTRAINT technicians_user_id_fkey FOREIGN KEY (user_id) REFERENCES aeronet.auth_users(id)
 );
-
--- Tickets / Órdenes de Trabajo
 CREATE TABLE aeronet.tickets (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    type aeronet.ticket_type NOT NULL,
-    subject VARCHAR(200),
-    description TEXT NOT NULL,
-    service_id UUID REFERENCES aeronet.services(id),
-    customer_id UUID REFERENCES aeronet.customers(id),
-    technician_id UUID REFERENCES aeronet.technicians(id),
-    category aeronet.ticket_category NOT NULL,
-    requested_plan UUID REFERENCES aeronet.plans(id),
-    priority aeronet.ticket_priority DEFAULT 'medium',
-    requires_maintenance BOOLEAN DEFAULT false,
-    status VARCHAR(50) DEFAULT 'open',
-    resolution_notes TEXT,
-    scheduled_date TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  type USER-DEFINED NOT NULL,
+  subject character varying,
+  description text NOT NULL,
+  service_id uuid,
+  customer_id uuid,
+  technician_id uuid,
+  category USER-DEFINED NOT NULL,
+  requested_plan uuid,
+  priority USER-DEFINED DEFAULT 'medium'::aeronet.ticket_priority,
+  requires_maintenance boolean DEFAULT false,
+  status character varying DEFAULT 'open'::character varying,
+  resolution_notes text,
+  scheduled_date timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT tickets_pkey PRIMARY KEY (id),
+  CONSTRAINT tickets_service_id_fkey FOREIGN KEY (service_id) REFERENCES aeronet.services(id),
+  CONSTRAINT tickets_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES aeronet.customers(id),
+  CONSTRAINT tickets_technician_id_fkey FOREIGN KEY (technician_id) REFERENCES aeronet.technicians(id),
+  CONSTRAINT tickets_requested_plan_fkey FOREIGN KEY (requested_plan) REFERENCES aeronet.plans(id)
 );
-
--- ==========================================
--- 4. FACTURACIÓN Y PAGOS (ALINEADO AL BACKEND)
--- ==========================================
-
--- Facturas / Deudas
 CREATE TABLE aeronet.invoices (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    service_id UUID REFERENCES aeronet.services(id) NOT NULL,
-    period VARCHAR(10) NOT NULL, -- Formato: YYYY-MM
-    total DECIMAL(10,2) NOT NULL,
-    subtotal DECIMAL(10,2),
-    igv DECIMAL(10,2),
-    status VARCHAR(50) DEFAULT 'pending',
-    due_date DATE NOT NULL,
-    payment_link TEXT,
-    checkout_id VARCHAR(150), -- Guardar preferencia de Mercado Pago
-    qr_code_url TEXT, -- Guardar URL del QR generado
-    short_payment_url TEXT, -- Guardar link acortado de Mercado Pago
-    mp_qr_code TEXT, -- Guardar código EMVCo del QR de Mercado Pago
-    notification_count INTEGER DEFAULT 0,
-    last_notification_date TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  service_id uuid NOT NULL,
+  period character varying NOT NULL,
+  total numeric NOT NULL,
+  subtotal numeric,
+  igv numeric,
+  status character varying DEFAULT 'pending'::character varying,
+  due_date date NOT NULL,
+  payment_link text,
+  checkout_id character varying,
+  qr_code_url text,
+  short_payment_url text,
+  mp_qr_code text,
+  notification_count integer DEFAULT 0,
+  last_notification_date timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT invoices_pkey PRIMARY KEY (id),
+  CONSTRAINT invoices_service_id_fkey FOREIGN KEY (service_id) REFERENCES aeronet.services(id)
 );
-
--- Función y Trigger para calcular el IGV automáticamente
-CREATE OR REPLACE FUNCTION aeronet.calculate_invoice_igv()
-RETURNS trigger AS $$
-BEGIN
-    NEW.subtotal := NEW.total / 1.18;
-    NEW.igv := NEW.total - NEW.subtotal;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE TRIGGER trg_calculate_invoice_igv
-BEFORE INSERT OR UPDATE ON aeronet.invoices
-FOR EACH ROW EXECUTE FUNCTION aeronet.calculate_invoice_igv();
-
--- Pagos Realizados
 CREATE TABLE aeronet.payments (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    customer_id UUID REFERENCES aeronet.customers(id),
-    service_id UUID REFERENCES aeronet.services(id),
-    amount_received DECIMAL(10,2) NOT NULL,
-    payment_method VARCHAR(50), 
-    transaction_reference VARCHAR(150) UNIQUE,
-    raw_webhook_data JSONB,
-    provider VARCHAR(50),
-    payment_mode VARCHAR(50),
-    checkout_id VARCHAR(150),
-    status VARCHAR(50) DEFAULT 'completed',
-    payment_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  customer_id uuid,
+  service_id uuid,
+  amount_received numeric NOT NULL,
+  payment_method character varying,
+  transaction_reference character varying UNIQUE,
+  raw_webhook_data jsonb,
+  provider character varying,
+  payment_mode character varying,
+  checkout_id character varying,
+  status character varying DEFAULT 'completed'::character varying,
+  payment_date timestamp with time zone DEFAULT now(),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT payments_pkey PRIMARY KEY (id),
+  CONSTRAINT payments_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES aeronet.customers(id),
+  CONSTRAINT payments_service_id_fkey FOREIGN KEY (service_id) REFERENCES aeronet.services(id)
 );
-
--- Alocaciones de Pago (Reparto FIFO de deudas)
 CREATE TABLE aeronet.payment_allocations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    payment_id UUID REFERENCES aeronet.payments(id) ON DELETE CASCADE,
-    invoice_id UUID REFERENCES aeronet.invoices(id) ON DELETE CASCADE,
-    amount_applied DECIMAL(10,2) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  payment_id uuid,
+  invoice_id uuid,
+  amount_applied numeric NOT NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT payment_allocations_pkey PRIMARY KEY (id),
+  CONSTRAINT payment_allocations_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES aeronet.payments(id),
+  CONSTRAINT payment_allocations_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES aeronet.invoices(id)
 );
-
--- Comprobantes Electrónicos (Nubefact)
 CREATE TABLE aeronet.electronic_documents (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    invoice_id UUID REFERENCES aeronet.invoices(id) ON DELETE CASCADE,
-    payment_id UUID REFERENCES aeronet.payments(id) ON DELETE SET NULL,
-    type VARCHAR(50), -- BOLETA o FACTURA
-    series VARCHAR(10),
-    number INTEGER,
-    external_id VARCHAR(150), -- nubefact_id / llave única
-    pdf_url TEXT,
-    xml_url TEXT,
-    sunat_status VARCHAR(50) DEFAULT 'pending',
-    response_data JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  invoice_id uuid,
+  payment_id uuid,
+  type character varying,
+  series character varying,
+  number integer,
+  external_id character varying,
+  pdf_url text,
+  xml_url text,
+  sunat_status character varying DEFAULT 'pending'::character varying,
+  response_data jsonb,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT electronic_documents_pkey PRIMARY KEY (id),
+  CONSTRAINT electronic_documents_invoice_id_fkey FOREIGN KEY (invoice_id) REFERENCES aeronet.invoices(id),
+  CONSTRAINT electronic_documents_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES aeronet.payments(id)
 );
-
--- ==========================================
--- 5. LOGS Y COMUNICACIÓN
--- ==========================================
-
--- Historial de Mensajes WhatsApp Meta
 CREATE TABLE aeronet.whatsapp_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    phone VARCHAR(50),
-    template_name VARCHAR(100),
-    status VARCHAR(50),
-    error_message TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  phone character varying,
+  template_name character varying,
+  status character varying,
+  error_message text,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT whatsapp_logs_pkey PRIMARY KEY (id)
 );
-```
