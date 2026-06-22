@@ -9,15 +9,6 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
 
-  // ==========================================================
-  // MIDDLEWARE PARA NGROK (CRÍTICO PARA OPENPAY/MÓVIL)
-  // Evita la pantalla de advertencia de ngrok
-  // ==========================================================
-  /** Middleware: agrega cabecera para evitar advertencia de ngrok en peticiones desde OpenPay/Móvil. */
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    res.setHeader('ngrok-skip-browser-warning', 'true');
-    next();
-  });
 
   // ==========================================================
   // CONFIGURACIÓN DE PUERTOS

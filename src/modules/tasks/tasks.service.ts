@@ -62,11 +62,8 @@ export class TasksService {
                     const amountFormatted = `S/ ${Number(inv.total).toFixed(2)}`;
                     const description = `AeroNet - Recibo ${inv.period ?? ''}`.trim();
 
-                    const { qrImageUrl, paymentLink } = await this.tryGetPaymentResources(
-                        inv.id,
-                        Number(inv.total),
-                        description,
-                    );
+                    const qrImageUrl = null;
+                    const paymentLink = null;
 
                     const result = await this.notificationService.sendUnifiedAlert({
                         phone: customer.phone,
@@ -136,11 +133,8 @@ export class TasksService {
                     const amountFormatted = `S/ ${Number(inv.total).toFixed(2)}`;
                     const description = `AeroNet - Recibo ${inv.period ?? ''}`.trim();
 
-                    const { qrImageUrl, paymentLink } = await this.tryGetPaymentResources(
-                        inv.id,
-                        Number(inv.total),
-                        description,
-                    );
+                    const qrImageUrl = null;
+                    const paymentLink = null;
 
                     const result = await this.notificationService.sendUnifiedAlert({
                         phone: customer.phone,
@@ -334,11 +328,8 @@ export class TasksService {
                     const amountFormatted = `S/ ${Number(inv.total).toFixed(2)}`;
                     const description = `AeroNet - Recibo ${inv.period ?? ''}`.trim();
 
-                    const { qrImageUrl, paymentLink } = await this.tryGetPaymentResources(
-                        inv.id,
-                        Number(inv.total),
-                        description,
-                    );
+                    const qrImageUrl = null;
+                    const paymentLink = null;
 
                     const result = await this.notificationService.sendUnifiedAlert({
                         phone: customer.phone,
@@ -494,43 +485,7 @@ export class TasksService {
     // MÉTODOS MANUALES (Panel Admin) - Resilientes a fallos de pago
     // ═══════════════════════════════════════════════════════════════════
 
-    /**
-     * Obtiene recursos de pago para notificaciones (QR y Link) desde Mercado Pago.
-     * Ambos intentos son INDEPENDIENTES: si uno falla el otro continúa.
-     * Nunca lanza excepción; retorna null en cada campo si el proveedor falla.
-     */
-    private async tryGetPaymentResources(
-        invoiceId: string,
-        amount: number,
-        description: string,
-    ): Promise<{ qrData: string | null; qrImageUrl: string | null; paymentLink: string | null }> {
-        let qrData: string | null = null;
-        let qrImageUrl: string | null = null;
-        let paymentLink: string | null = null;
 
-        // ── Paso 1: QR con Mercado Pago ───────────────────────────────────
-        this.logger.log(`[RESOURCES] Paso 1 — QR Mercado Pago para factura ${invoiceId}...`);
-        qrData = await this.paymentsService.tryGetMpQrData(invoiceId, amount, description);
-        if (qrData) {
-            // Convierte el string EMVCo a URL de imagen (qrserver.com, acceso público, sin API key)
-            qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrData)}&size=300x300&format=png`;
-            this.logger.log(`[RESOURCES] ✅ QR MP obtenido → imagen: ${qrImageUrl.slice(0, 80)}...`);
-        } else {
-            this.logger.warn(`[RESOURCES] ⚠️  Fallo QR MP. Continuando sin QR.`);
-        }
-
-        // ── Paso 2: Link con Mercado Pago ──────────────────────────────────
-        this.logger.log(`[RESOURCES] Paso 2 — Link Mercado Pago para factura ${invoiceId}...`);
-        try {
-            const result = await this.paymentsService.generatePaymentUrl(invoiceId, 'BOLETA');
-            paymentLink = result.url as string;
-            this.logger.log(`[RESOURCES] ✅ Link MP obtenido: ${paymentLink.slice(0, 60)}...`);
-        } catch (err: any) {
-            this.logger.warn(`[RESOURCES] ⚠️  Fallo Link MP: ${err?.message}. Se enviará sin enlace.`);
-        }
-
-        return { qrData, qrImageUrl, paymentLink };
-    }
     /**
      * Construye la respuesta estructurada del panel admin a partir del resultado de `sendUnifiedAlert`.
      */
@@ -587,12 +542,8 @@ export class TasksService {
         const amountFormatted = `S/ ${Number(inv.total).toFixed(2)}`;
         const description = `AeroNet - Recibo ${inv.period ?? ''}`.trim();
 
-        this.logger.log(`[PREVENTIVE] Obteniendo recursos de pago para ${customer.full_name}...`);
-        const { qrImageUrl, paymentLink } = await this.tryGetPaymentResources(
-            invoiceId,
-            Number(inv.total),
-            description,
-        );
+        const qrImageUrl = null;
+        const paymentLink = null;
 
         this.logger.log(`[PREVENTIVE] Enviando notificación unificada (WA + email)...`);
         const result = await this.notificationService.sendUnifiedAlert({
@@ -627,12 +578,8 @@ export class TasksService {
         const amountFormatted = `S/ ${Number(inv.total).toFixed(2)}`;
         const description = `AeroNet - Recibo ${inv.period ?? ''}`.trim();
 
-        this.logger.log(`[BILLING-DAY] Obteniendo recursos de pago para ${customer.full_name}...`);
-        const { qrImageUrl, paymentLink } = await this.tryGetPaymentResources(
-            invoiceId,
-            Number(inv.total),
-            description,
-        );
+        const qrImageUrl = null;
+        const paymentLink = null;
 
         this.logger.log(`[BILLING-DAY] Enviando notificación unificada (WA + email)...`);
         const result = await this.notificationService.sendUnifiedAlert({
@@ -666,12 +613,8 @@ export class TasksService {
         const amountFormatted = `S/ ${Number(inv.total).toFixed(2)}`;
         const description = `AeroNet - Recibo ${inv.period ?? ''}`.trim();
 
-        this.logger.log(`[OVERDUE] Obteniendo recursos de pago para ${customer.full_name}...`);
-        const { qrImageUrl, paymentLink } = await this.tryGetPaymentResources(
-            invoiceId,
-            Number(inv.total),
-            description,
-        );
+        const qrImageUrl = null;
+        const paymentLink = null;
 
         this.logger.log(`[OVERDUE] Enviando notificación unificada (WA + email)...`);
         const result = await this.notificationService.sendUnifiedAlert({

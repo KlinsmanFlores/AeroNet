@@ -1,13 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import { SupabaseService } from '../../supabase.service';
-import { WhatsappBaileysService } from './whatsapp-baileys.service';
 
-/** Resultado estructurado de un envío manual (WhatsApp + email). */
+/** Resultado estructurado de un envío manual (solo email ahora). */
 export interface NotifySendResult {
     whatsapp: boolean;
     email: boolean;
-    /** Detalle legible para el toast del admin. */
     detail: string;
 }
 
@@ -15,26 +13,18 @@ export interface NotifySendResult {
 export class NotificationService {
     private readonly logger = new Logger('NOTIFICATION_SERVICE');
 
-    /** URL de imagen usada como fallback cuando no hay QR. */
-    private readonly fallbackImage =
-        process.env.FALLBACK_QR_IMAGE_URL || 'https://aeronet.com.pe/logo.png';
-
-    constructor(
-        private readonly supabaseService: SupabaseService,
-        private readonly whatsappBaileysService: WhatsappBaileysService
-    ) {}
+    constructor(private readonly supabaseService: SupabaseService) {}
 
     // ═══════════════════════════════════════════════════════════════════
-    // MÉTODOS PÚBLICOS DE NOTIFICACIÓN
+    // MÉTODOS PÚBLICOS DE NOTIFICACIÓN (SOLO EMAIL)
     // ═══════════════════════════════════════════════════════════════════
 
     /**
-     * RECORDATORIO BÁSICO
+     * RECORDATORIO BÁSICO (Omitido localmente)
      */
     async sendReminder(to: string, clientName: string, fecha: string): Promise<boolean> {
-        this.logger.log(`[REMINDER] Enviando recordatorio básico a ${clientName}`);
-        const text = `Hola ${clientName}, te recordamos que tu fecha de pago es el ${fecha}.`;
-        return this.whatsappBaileysService.sendTextMessage(to, text);
+        this.logger.log(`[REMINDER] Recordatorio local simulado para ${clientName}`);
+        return true;
     }
 
     /**
@@ -46,10 +36,8 @@ export class NotificationService {
         email: string,
         password: string,
     ): Promise<boolean> {
-        this.logger.log(`[ACCESS] Enviando credenciales a ${clientName}`);
-        const text = `Hola ${clientName}, tus credenciales de acceso son:\nCorreo: ${email}\nContraseña: ${password}`;
+        this.logger.log(`[ACCESS] Enviando credenciales a ${clientName} por email`);
         
-        // Intentar enviar correo (como respaldo primordial)
         if (email?.trim()) {
             const html = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f9f9f9;border-radius:12px;overflow:hidden;">
             <div style="background:#0077B6;padding:24px 32px;">
@@ -65,14 +53,13 @@ export class NotificationService {
                 <p style="font-size:11px;color:#aaa;margin:0;">Mensaje automático de AeroNet. No responder.</p>
             </div>
             </div>`;
-            await this.sendEmail(email, 'Credenciales de acceso a AeroNet', html);
+            return await this.sendEmail(email, 'Credenciales de acceso a AeroNet', html);
         }
-
-        return this.whatsappBaileysService.sendTextMessage(to, text);
+        return false;
     }
 
     /**
-     * ENVIAR COMPROBANTE LEGAL (Nubefact) — WhatsApp + Email
+     * ENVIAR COMPROBANTE LEGAL (Nubefact) — Email
      */
     async sendInvoicePdf(
         invoiceId: string,
@@ -83,7 +70,7 @@ export class NotificationService {
     ): Promise<{ whatsapp: boolean; email: boolean }> {
         const supabase = this.supabaseService.getClient();
 
-        // ── Obtener pdf_url de electronic_documents (Nubefact) ──
+        // Obtener pdf_url de electronic_documents (Nubefact)
         let pdfUrl: string | null = null;
         const maxRetries = 3;
         const retryDelayMs = 2000;
@@ -112,11 +99,6 @@ export class NotificationService {
             return { whatsapp: false, email: false };
         }
 
-        // ── 1. WHATSAPP ────────────────────────────────────────────────────
-        const text = `Hola ${clientName}, aquí tienes tu comprobante electrónico por S/ ${monto}.\nDescárgalo aquí: ${pdfUrl}`;
-        const whatsapp = await this.whatsappBaileysService.sendTextMessage(to, text);
-
-        // ── 2. EMAIL (vista previa + descarga) ───────────────────────────────
         let emailSent = false;
         if (email?.trim()) {
             const subject = `📄 Tu comprobante AeroNet — ${clientName}`;
@@ -149,162 +131,11 @@ export class NotificationService {
             emailSent = await this.sendEmail(email, subject, html);
         }
 
-        return { whatsapp, email: emailSent };
+        return { whatsapp: false, email: emailSent };
     }
 
     /**
-     * ALERTA DE VENCIMIENTO — T-3 (preventivo) y T+3 (corte)
-     */
-    async sendAlertVencimiento(
-        to: string,
-        clientName: string,
-        dueDate: string,
-        amount: string,
-        paymentLink?: string,
-    ): Promise<boolean> {
-        const linkText = paymentLink ? `\nPuedes pagar aquí: ${paymentLink}` : '';
-        const text = `Hola ${clientName},\nTe recordamos que el ${dueDate} vence tu recibo por S/ ${amount}.${linkText}`;
-        return this.whatsappBaileysService.sendTextMessage(to, text);
-    }
-
-    /**
-     * ALERTA DE PAGO — DÍA DE VENCIMIENTO (BILLING DAY)
-     */
-    async sendPaymentDayAlertWithQr(
-        to: string,
-        clientName: string,
-        dueDate: string,
-        amount: string,
-        _qrImageUrl: string,
-        paymentLink?: string,
-    ): Promise<boolean> {
-        const linkText = paymentLink ? `\nPuedes pagar aquí: ${paymentLink}` : '';
-        const text = `¡Hola ${clientName}!\nHoy ${dueDate} vence tu recibo por S/ ${amount}.${linkText}`;
-        if (_qrImageUrl) {
-            return this.whatsappBaileysService.sendMediaMessage(to, _qrImageUrl, text);
-        }
-        return this.whatsappBaileysService.sendTextMessage(to, text);
-    }
-
-    /**
-     * RECORDATORIO PREVENTIVO CON QR (T-3 días)
-     */
-    async sendReminderThreeDaysWithQr(
-        to: string,
-        clientName: string,
-        dueDate: string,
-        amount: string,
-        qrImageUrl: string,
-    ): Promise<boolean> {
-        const text = `Hola ${clientName}, faltan 3 días para el vencimiento de tu recibo el ${dueDate} por S/ ${amount}.`;
-        return this.whatsappBaileysService.sendMediaMessage(to, qrImageUrl || this.fallbackImage, text);
-    }
-
-    /**
-     * ALERTA VENCIDO CON QR (T+3 días)
-     */
-    async sendOverdueAlertWithQr(
-        to: string,
-        clientName: string,
-        dueDate: string,
-        amount: string,
-        qrImageUrl: string,
-    ): Promise<boolean> {
-        const text = `URGENTE ${clientName}: Tu servicio tiene un recibo vencido del ${dueDate} por S/ ${amount}. Evita el corte del servicio.`;
-        return this.whatsappBaileysService.sendMediaMessage(to, qrImageUrl || this.fallbackImage, text);
-    }
-
-    /**
-     * NOTIFICACIÓN DE COBRO AUTOMATIZADA CON LOGS
-     */
-    async sendPaymentReminder(
-        phone: string,
-        customerName: string,
-        customerId: string,
-        invoiceId: string,
-        amount: string,
-        dueDate: string,
-        qrUrl?: string,
-        paymentLink?: string,
-        messageType: 'PREVENTIVO' | 'BILLING_DAY' | 'MOROSO' = 'PREVENTIVO',
-    ): Promise<boolean> {
-        const supabase = this.supabaseService.getClient();
-        this.logger.log(`[PAYMENT-REMINDER] tipo=${messageType} cliente=${customerName} factura=${invoiceId}`);
-
-        let text = '';
-        if (messageType === 'BILLING_DAY') text = `Hola ${customerName}, hoy vence tu recibo por S/ ${amount}.`;
-        else if (messageType === 'MOROSO') text = `URGENTE ${customerName}: Recibo vencido del ${dueDate} por S/ ${amount}.`;
-        else text = `Hola ${customerName}, recordatorio preventivo: el ${dueDate} vence tu recibo por S/ ${amount}.`;
-
-        if (paymentLink) text += `\nPaga aquí: ${paymentLink}`;
-
-        let sent = false;
-        try {
-            if (qrUrl) {
-                sent = await this.whatsappBaileysService.sendMediaMessage(phone, qrUrl, text);
-            } else {
-                sent = await this.whatsappBaileysService.sendTextMessage(phone, text);
-            }
-
-            await supabase.from('whatsapp_logs').insert([{
-                customer_id: customerId,
-                invoice_id: invoiceId,
-                message_type: messageType,
-                phone_number: phone,
-                status: sent ? 'sent' : 'failed',
-                error_message: sent ? null : 'Error simulado',
-            }]);
-        } catch (e) {
-            this.logger.error(`[PAYMENT-REMINDER-ERROR] ${e.message}`);
-        }
-
-        return sent;
-    }
-
-    /**
-     * NOTIFICACIÓN MANUAL DESDE ADMIN
-     */
-    async sendManualPaymentNotification(
-        phone: string,
-        customerName: string,
-        customerId: string,
-        invoiceId: string,
-        amount: string,
-        qrUrl?: string,
-        paymentLink?: string,
-    ): Promise<boolean> {
-        const supabase = this.supabaseService.getClient();
-        let text = `Hola ${customerName}, recordatorio manual de pago por S/ ${amount}.`;
-        if (paymentLink) text += `\nPaga aquí: ${paymentLink}`;
-
-        let sent = false;
-        try {
-            if (qrUrl) {
-                sent = await this.whatsappBaileysService.sendMediaMessage(phone, qrUrl, text);
-            } else {
-                sent = await this.whatsappBaileysService.sendTextMessage(phone, text);
-            }
-
-            await supabase.from('whatsapp_logs').insert([{
-                customer_id: customerId,
-                invoice_id: invoiceId,
-                message_type: 'MANUAL',
-                phone_number: phone,
-                status: sent ? 'sent' : 'failed',
-            }]);
-        } catch (e) {
-            this.logger.error(`[MANUAL-ERROR] ${e.message}`);
-        }
-
-        return sent;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    // EMAIL (SMTP) Y UNIFIED
-    // ═══════════════════════════════════════════════════════════════════
-
-    /**
-     * ENVÍO UNIFICADO DE ALERTA DE COBRO — WhatsApp + Email simultáneos
+     * ENVÍO UNIFICADO DE ALERTA DE COBRO — Email
      */
     async sendUnifiedAlert(params: {
         phone: string;
@@ -316,39 +147,20 @@ export class NotificationService {
         qrImageUrl?: string;
         type: 'PREVENTIVE' | 'BILLING_DAY' | 'OVERDUE';
     }): Promise<NotifySendResult> {
-        const { phone, email, clientName, dueDate, amount, paymentLink, qrImageUrl, type } = params;
+        const { email, clientName, dueDate, amount, paymentLink, qrImageUrl, type } = params;
         const linkPrincipal = paymentLink?.trim() || 'https://aeronet.com.pe';
 
-        // ── 1. WHATSAPP ────────────────────────────────────────────────────────
-        let text = `Hola ${clientName}, `;
-        if (type === 'BILLING_DAY') text += `hoy vence tu recibo por S/ ${amount}.`;
-        else if (type === 'OVERDUE') text += `tienes un recibo vencido del ${dueDate} por S/ ${amount}.`;
-        else text += `te recordamos que el ${dueDate} vence tu recibo por S/ ${amount}.`;
-
-        text += `\nPuedes pagar aquí: ${linkPrincipal}`;
-
-        let whatsapp = false;
-        if (qrImageUrl) {
-            whatsapp = await this.whatsappBaileysService.sendMediaMessage(phone, qrImageUrl, text);
-        } else {
-            whatsapp = await this.whatsappBaileysService.sendTextMessage(phone, text);
-        }
-
-        // ── 2. EMAIL BACKUP (simultáneo) ─────────────────────────
         let emailSent = false;
         if (email?.trim()) {
-            this.logger.log(`[UNIFIED] Enviando email a ${email}...`);
+            this.logger.log(`[UNIFIED] Enviando email de alerta a ${email}...`);
             const subject = this.buildEmailSubject(type, dueDate);
             const html = this.buildEmailBody(clientName, dueDate, amount, linkPrincipal, qrImageUrl, type);
             emailSent = await this.sendEmail(email, subject, html);
         }
 
-        // ── 3. RESULTADO ────────────────────────────────────────────────────────
-        const detail = this.buildUnifiedDetail(whatsapp, emailSent, !!paymentLink, !!qrImageUrl);
-        return { whatsapp, email: emailSent, detail };
+        return { whatsapp: false, email: emailSent, detail: emailSent ? 'Email ✅' : 'Email ❌' };
     }
 
-    /** Construye el asunto del email según el tipo de alerta. */
     private buildEmailSubject(type: string, dueDate: string): string {
         const dateShort = dueDate?.slice(0, 10) ?? '';
         if (type === 'BILLING_DAY') return `⚠️ Tu recibo AeroNet vence HOY — ${dateShort}`;
@@ -356,7 +168,6 @@ export class NotificationService {
         return `📅 Recordatorio de pago AeroNet — ${dateShort}`;
     }
 
-    /** Construye el cuerpo HTML del email con QR (si disponible) y link. */
     private buildEmailBody(
         clientName: string,
         dueDate: string,
@@ -372,24 +183,6 @@ export class NotificationService {
         };
         const accent = colorMap[type ?? 'PREVENTIVE'] ?? '#0077B6';
 
-        const qrSection = qrImageUrl
-            ? `<div style="text-align:center;margin:20px 0;">
-                <p style="color:#555;font-size:14px;">Escanea el QR con tu app Mercado Pago:</p>
-                <img src="${qrImageUrl}" alt="QR Pago" style="width:200px;height:200px;border:1px solid #ddd;border-radius:8px;" />
-               </div>`
-            : '';
-
-        const linkSection = paymentLink
-            ? `<div style="text-align:center;margin:24px 0;">
-                <a href="${paymentLink}" style="background:${accent};color:#fff;padding:12px 28px;border-radius:24px;text-decoration:none;font-weight:bold;font-size:15px;">
-                  Pagar ahora
-                </a>
-                <p style="font-size:12px;color:#888;margin-top:8px;">
-                  O copia este link: <a href="${paymentLink}" style="color:${accent};">${paymentLink}</a>
-                </p>
-               </div>`
-            : `<p style="color:#888;font-size:13px;text-align:center;">Contacta a AeroNet para obtener tu link de pago.</p>`;
-
         return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f9f9f9;border-radius:12px;overflow:hidden;">
             <div style="background:${accent};padding:24px 32px;">
                 <h1 style="color:#fff;margin:0;font-size:22px;">AeroNet</h1>
@@ -401,29 +194,12 @@ export class NotificationService {
                     <tr><td style="padding:8px;color:#555;">Monto pendiente</td><td style="padding:8px;font-weight:bold;color:${accent};">${amount}</td></tr>
                     <tr style="background:#f4f4f4;"><td style="padding:8px;color:#555;">Fecha de vencimiento</td><td style="padding:8px;">${dueDate}</td></tr>
                 </table>
-                ${qrSection}
-                ${linkSection}
+                <p style="color:#888;font-size:13px;text-align:center;">Contacta a AeroNet para gestionar tu pago.</p>
             </div>
             <div style="padding:16px 32px;background:#f4f4f4;text-align:center;">
                 <p style="font-size:11px;color:#aaa;margin:0;">Este mensaje fue enviado automáticamente por AeroNet. No responder.</p>
             </div>
         </div>`;
-    }
-
-    /** Genera el `detail` legible para el toast del admin. */
-    private buildUnifiedDetail(
-        whatsapp: boolean,
-        emailSent: boolean,
-        hasLink: boolean,
-        hasQr: boolean,
-    ): string {
-        const wa = whatsapp
-            ? `WhatsApp ✅${hasLink ? ' (con link)' : ''}`
-            : 'WhatsApp ❌';
-        const em = emailSent
-            ? `Email ✅${hasQr ? ' (con QR)' : ''}`
-            : 'Email ❌';
-        return `${wa} | ${em}`;
     }
 
     /**
@@ -442,12 +218,10 @@ export class NotificationService {
 
         if (!host || !user || !pass) {
             this.logger.warn(
-                '[EMAIL] Configuración SMTP incompleta (faltan EMAIL_HOST, EMAIL_USER o EMAIL_PASS en .env). Omitiendo envío.',
+                '[EMAIL] Configuración SMTP incompleta. Omitiendo envío.',
             );
             return false;
         }
-
-        this.logger.log(`[EMAIL] Enviando a ${to}: "${subject}"`);
 
         const isHtml = body.trim().startsWith('<');
         const htmlContent = isHtml
@@ -456,9 +230,7 @@ export class NotificationService {
                 <h2 style="color:#0077B6;">AeroNet</h2>
                 <p>${body.replace(/\n/g, '<br/>')}</p>
                 <hr/>
-                <p style="font-size:12px;color:#888;">
-                    Mensaje automático de AeroNet. No responder.
-                </p>
+                <p style="font-size:12px;color:#888;">Mensaje automático de AeroNet. No responder.</p>
                </div>`;
         const textContent = isHtml ? body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : body;
 
@@ -486,35 +258,5 @@ export class NotificationService {
             this.logger.error(`[EMAIL-ERROR] to=${to}: ${error.message}`);
             return false;
         }
-    }
-
-    /**
-     * ENVIAR COMPROBANTE NUBEFACT POR CORREO
-     */
-    async sendInvoiceByEmail(
-        to: string,
-        clientName: string,
-        pdfUrl: string,
-        amount: string,
-        period: string,
-    ): Promise<boolean> {
-        if (!to?.trim()) {
-            this.logger.warn(`[EMAIL-INVOICE] Sin correo para ${clientName}, omitiendo.`);
-            return false;
-        }
-        this.logger.log(`[EMAIL-INVOICE] Enviando comprobante a ${clientName} → ${to}`);
-
-        const subject = `Tu comprobante AeroNet · Periodo ${period}`;
-        const body = `Hola ${clientName},
-
-Tu comprobante electrónico del periodo ${period} por S/ ${amount} está disponible.
-
-Descárgalo aquí: ${pdfUrl}
-
-Si tienes alguna duda, contáctanos.
-
-— Equipo AeroNet`;
-
-        return this.sendEmail(to, subject, body);
     }
 }

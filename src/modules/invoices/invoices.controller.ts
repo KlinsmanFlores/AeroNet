@@ -142,23 +142,5 @@ export class InvoicesController {
     return this.invoicesService.remove(id);
   } 
   
-  /**
-   * Endpoint para envío manual desde la Interfaz
-   * Ruta: POST /invoices/:id/send-whatsapp
-   * 
-   * ACTUALIZADO: Ahora envía QR y Link de pago usando el nuevo sistema
-   */
-  @Post(':id/send-whatsapp')
-  @Roles('admin')
-  @ApiOperation({ summary: 'Enviar recordatorio de pago manual por WhatsApp' })
-  async sendWhatsappNotification(@Param('id') id: string) {
-    // Delegamos al paymentsService que maneja todo el flujo:
-    // - Buscar factura y cliente
-    // - Generar QR/Link si no existe
-    // - Enviar por WhatsApp con el nuevo método
-    // - Registrar en whatsapp_logs
-    const result = await this.paymentsService.sendManualPaymentReminder(id);
-    
-    return result;
-  }
+
 }
